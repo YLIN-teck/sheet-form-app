@@ -3,11 +3,12 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Bin Barcode Entry</title>
+  <title>Fast Barcode Collector</title>
   <style>
     * { box-sizing: border-box; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
     body {
-      background: #f1f5f9;
+      background: #0f172a;
+      color: #f8fafc;
       display: flex;
       justify-content: center;
       align-items: center;
@@ -15,115 +16,180 @@
       margin: 0;
       padding: 16px;
     }
-    .card {
-      background: #ffffff;
+    .scanner-card {
+      background: #1e293b;
       padding: 24px;
       border-radius: 10px;
-      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+      box-shadow: 0 4px 16px rgba(0,0,0,0.4);
       width: 100%;
-      max-width: 420px;
+      max-width: 440px;
     }
-    h2 { margin-top: 0; color: #0f172a; text-align: center; }
-    .form-group { margin-bottom: 16px; }
-    label { display: block; font-weight: 600; margin-bottom: 6px; color: #334155; }
+    h2 { margin: 0 0 16px 0; text-align: center; color: #38bdf8; }
+    .form-group { margin-bottom: 12px; }
+    label { display: block; font-size: 13px; font-weight: 600; color: #94a3b8; margin-bottom: 4px; }
     input {
       width: 100%;
       padding: 10px 12px;
-      border: 1px solid #cbd5e1;
+      background: #0f172a;
+      border: 1px solid #334155;
       border-radius: 6px;
       font-size: 15px;
+      color: #f8fafc;
     }
-    input:focus { outline: none; border-color: #2563eb; }
-    button {
-      width: 100%;
-      background: #2563eb;
-      color: #ffffff;
-      border: none;
-      padding: 12px;
-      border-radius: 6px;
-      font-size: 16px;
-      font-weight: 600;
-      cursor: pointer;
-    }
-    button:disabled { background: #94a3b8; cursor: not-allowed; }
-    .status {
+    input:focus { outline: none; border-color: #38bdf8; }
+    .status-bar {
+      display: flex;
+      justify-content: space-between;
       margin-top: 14px;
-      text-align: center;
-      font-size: 14px;
-      font-weight: 500;
+      padding: 10px;
+      background: #0f172a;
+      border-radius: 6px;
+      font-size: 13px;
     }
-    .success { color: #16a34a; }
-    .error { color: #dc2626; }
+    .badge {
+      display: inline-block;
+      padding: 2px 8px;
+      border-radius: 9999px;
+      font-weight: 600;
+    }
+    .badge-queue { background: #eab308; color: #000; }
+    .badge-synced { background: #22c55e; color: #000; }
+    .log-list {
+      margin-top: 14px;
+      max-height: 150px;
+      overflow-y: auto;
+      font-size: 12px;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      padding: 6px;
+    }
+    .log-entry {
+      display: flex;
+      justify-content: space-between;
+      padding: 4px 6px;
+      border-bottom: 1px solid #1e293b;
+    }
   </style>
 </head>
 <body>
 
-  <div class="card">
-    <h2>Bin Data Entry</h2>
-    <form id="entryForm">
-      <div class="form-group">
-        <label for="barcode">Barcode</label>
-        <input type="text" id="barcode" placeholder="Scan or enter barcode" required autofocus />
-      </div>
+  <div class="scanner-card">
+    <h2>Rapid Scanner</h2>
+    
+    <div class="form-group">
+      <label>User ID</label>
+      <input type="text" id="user" placeholder="Enter Operator ID" />
+    </div>
 
-      <div class="form-group">
-        <label for="binLocation">Bin Location</label>
-        <input type="text" id="binLocation" placeholder="e.g. A-01-02" required />
-      </div>
+    <div class="form-group">
+      <label>Bin Location</label>
+      <input type="text" id="binLocation" placeholder="Scan or enter Bin (e.g., B-04-12)" />
+    </div>
 
-      <div class="form-group">
-        <label for="user">User ID / Name</label>
-        <input type="text" id="user" placeholder="Enter your ID" required />
-      </div>
+    <div class="form-group">
+      <label>Barcode (Auto-submits on Enter / Scanner)</label>
+      <input type="text" id="barcode" placeholder="Scan Barcode here..." autofocus />
+    </div>
 
-      <button type="submit" id="submitBtn">Submit Data</button>
-      <div id="status" class="status"></div>
-    </form>
+    <div class="status-bar">
+      <span>Unsaved: <span id="queueCount" class="badge badge-queue">0</span></span>
+      <span>Total Saved: <span id="totalSaved" class="badge badge-synced">0</span></span>
+    </div>
+
+    <div class="log-list" id="logList"></div>
   </div>
 
   <script>
-    // Paste your Google Apps Script Web App URL below:
     const SCRIPT_URL = "https://script.google.com/macros/s/AKfycbyIm0910l8N8BLDZtriGfgsNqDtKeD4d4C2mliDD56T4r-E9qwLnybYPrBOOFMzOdBY/exec";
 
-    const form = document.getElementById("entryForm");
-    const submitBtn = document.getElementById("submitBtn");
-    const statusDiv = document.getElementById("status");
+    const barcodeInput = document.getElementById("barcode");
+    const binInput = document.getElementById("binLocation");
+    const userInput = document.getElementById("user");
+    const queueCountEl = document.getElementById("queueCount");
+    const totalSavedEl = document.getElementById("totalSaved");
+    const logList = document.getElementById("logList");
 
-    form.addEventListener("submit", async (e) => {
-      e.preventDefault();
+    let syncQueue = [];
+    let isSyncing = false;
+    let totalSaved = 0;
 
-      submitBtn.disabled = true;
-      submitBtn.textContent = "Saving...";
-      statusDiv.textContent = "";
-      statusDiv.className = "status";
+    // Load saved User/Bin preferences locally
+    userInput.value = localStorage.getItem("preferred_user") || "";
+    binInput.value = localStorage.getItem("preferred_bin") || "";
 
-      const payload = {
-        barcode: document.getElementById("barcode").value,
-        binLocation: document.getElementById("binLocation").value,
-        user: document.getElementById("user").value,
-      };
+    userInput.addEventListener("input", () => localStorage.setItem("preferred_user", userInput.value));
+    binInput.addEventListener("input", () => localStorage.setItem("preferred_bin", binInput.value));
+
+    // Listen for barcode scan (Scanner sends "Enter" key)
+    barcodeInput.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") {
+        e.preventDefault();
+        const code = barcodeInput.value.trim();
+        if (!code) return;
+
+        const record = {
+          barcode: code,
+          binLocation: binInput.value.trim(),
+          user: userInput.value.trim(),
+          time: new Date().toLocaleTimeString()
+        };
+
+        // Instant UI Response
+        syncQueue.push(record);
+        updateQueueUI();
+        addLog(record);
+
+        // Reset barcode field immediately for next scan
+        barcodeInput.value = "";
+        barcodeInput.focus();
+
+        // Trigger background sync
+        processQueue();
+      }
+    });
+
+    function updateQueueUI() {
+      queueCountEl.textContent = syncQueue.length;
+    }
+
+    function addLog(item) {
+      const entry = document.createElement("div");
+      entry.className = "log-entry";
+      entry.innerHTML = `<span>${item.barcode} [${item.binLocation || "No Bin"}]</span><span>${item.time}</span>`;
+      logList.prepend(entry);
+    }
+
+    // Process queued entries in batches
+    async function processQueue() {
+      if (isSyncing || syncQueue.length === 0) return;
+      isSyncing = true;
+
+      // Extract current batch
+      const batchToSend = [...syncQueue];
 
       try {
         await fetch(SCRIPT_URL, {
           method: "POST",
           mode: "no-cors",
           headers: { "Content-Type": "text/plain;charset=utf-8" },
-          body: JSON.stringify(payload),
+          body: JSON.stringify(batchToSend),
         });
 
-        statusDiv.textContent = "✓ Data saved to Google Sheet!";
-        statusDiv.classList.add("success");
-        form.reset();
-        document.getElementById("barcode").focus();
+        // Remove sent items from queue
+        syncQueue.splice(0, batchToSend.length);
+        totalSaved += batchToSend.length;
+        totalSavedEl.textContent = totalSaved;
+        updateQueueUI();
       } catch (err) {
-        statusDiv.textContent = "✗ Failed to submit. Please check connection.";
-        statusDiv.classList.add("error");
-        console.error(err);
+        console.error("Sync error, retrying in 3s...", err);
       } finally {
-        submitBtn.disabled = false;
-        submitBtn.textContent = "Submit Data";
+        isSyncing = false;
+        // If items were added while uploading, flush remaining
+        if (syncQueue.length > 0) {
+          setTimeout(processQueue, 500);
+        }
       }
-    });
+    }
   </script>
 </body>
 </html>
